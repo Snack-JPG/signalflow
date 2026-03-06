@@ -1,63 +1,96 @@
-import Image from "next/image";
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Asset } from '@/lib/types';
+import { useWebSocket } from '@/hooks/useWebSocket';
+
+// Import all components
+import NarrativeRadar from '@/components/NarrativeRadar';
+import OrderBookDepth from '@/components/OrderBookDepth';
+import TwitterFeed from '@/components/TwitterFeed';
+import DivergenceSignals from '@/components/DivergenceSignals';
+import ConvictionScores from '@/components/ConvictionScores';
+import MicrostructureMetrics from '@/components/MicrostructureMetrics';
+import UnifiedAlertFeed from '@/components/UnifiedAlertFeed';
+import AIBriefing from '@/components/AIBriefing';
 
 export default function Home() {
+  const [selectedAsset, setSelectedAsset] = useState<Asset>('BTC/USDT');
+  const { connectionStatus, changeAsset } = useWebSocket();
+
+  useEffect(() => {
+    changeAsset(selectedAsset);
+  }, [selectedAsset, changeAsset]);
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen bg-[#0a0a0a] text-gray-100">
+      {/* Header Bar */}
+      <header className="border-b border-gray-800 bg-[#111111] px-4 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+              SignalFlow Command Center
+            </h1>
+
+            {/* Asset Selector */}
+            <select
+              value={selectedAsset}
+              onChange={(e) => setSelectedAsset(e.target.value as Asset)}
+              className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 transition-colors"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <option value="BTC/USDT">BTC/USDT</option>
+              <option value="ETH/USDT">ETH/USDT</option>
+              <option value="SOL/USDT">SOL/USDT</option>
+            </select>
+          </div>
+
+          {/* Connection Status */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">QuantFlow:</span>
+              <span className={`status-dot ${connectionStatus.quantflow ? 'status-connected' : 'status-disconnected'}`} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">NarrativeFlow:</span>
+              <span className={`status-dot ${connectionStatus.narrativeflow ? 'status-connected' : 'status-disconnected'}`} />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">SignalFlow:</span>
+              <span className={`status-dot ${connectionStatus.signalflow ? 'status-connected' : 'status-disconnected'}`} />
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </header>
+
+      {/* Main Grid Layout */}
+      <main className="p-4 h-[calc(100vh-64px)]">
+        <div className="grid grid-cols-12 gap-4 h-full">
+          {/* Left Column - Narrative & Order Book */}
+          <div className="col-span-3 grid grid-rows-2 gap-4">
+            <NarrativeRadar />
+            <OrderBookDepth />
+          </div>
+
+          {/* Center Column - Main Panels */}
+          <div className="col-span-6 grid grid-rows-[1fr_auto_1.5fr] gap-4">
+            {/* Top Row - Conviction Scores (KEY PANEL) */}
+            <ConvictionScores />
+
+            {/* Middle Row - Microstructure Metrics */}
+            <MicrostructureMetrics />
+
+            {/* Bottom Row - Two columns */}
+            <div className="grid grid-cols-2 gap-4">
+              <DivergenceSignals />
+              <AIBriefing />
+            </div>
+          </div>
+
+          {/* Right Column - Twitter & Alerts */}
+          <div className="col-span-3 grid grid-rows-2 gap-4">
+            <TwitterFeed />
+            <UnifiedAlertFeed />
+          </div>
         </div>
       </main>
     </div>
