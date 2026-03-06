@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # QuantFlow backend (Order book intelligence)
+  quantflow:
+    image: quantflow:latest
+    container_name: quantflow
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/quantflow
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - signalflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # NarrativeFlow backend (Narrative tracking)
+  narrativeflow:
+    image: narrativeflow:latest
+    container_name: narrativeflow
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/narrativeflow
+    depends_on:
+      - redis
+      - postgres
+    networks:
+      - signalflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # SignalFlow backend (Signal fusion engine)
+  signalflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: signalflow
+    ports:
+      - "8002:8002"
+    environment:
+      - QUANTFLOW_URL=ws://quantflow:8000
+      - NARRATIVEFLOW_URL=ws://narrativeflow:8001
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - quantflow
+      - narrativeflow
+      - redis
+    networks:
+      - signalflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/signals/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching and pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: signalflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - signalflow-network
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+  # PostgreSQL for persistent storage
+  postgres:
+    image: postgres:15-alpine
+    container_name: signalflow-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=signalflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - signalflow-network
+    restart: unless-stopped
+
+networks:
+  signalflow-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+  postgres-data:
