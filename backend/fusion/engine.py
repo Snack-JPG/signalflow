@@ -80,6 +80,37 @@ class SignalFusionEngine:
                 logger.error(f"Error in fusion engine loop: {e}")
                 await asyncio.sleep(5)
 
+    async def run_with_reconnection(self):
+        """Main loop with automatic reconnection on failure"""
+        self.running = True
+        logger.info("Signal Fusion Engine started with reconnection support")
+
+        while self.running:
+            try:
+                # Check if we have at least one backend connected
+                qf_connected = self.qf_client and self.qf_client.is_connected()
+                nf_connected = self.nf_client and self.nf_client.is_connected()
+
+                if not qf_connected and not nf_connected:
+                    logger.warning("No backends connected, running in degraded mode")
+                    # Still process with whatever cached data we have
+
+                # Update conviction scores with available data
+                await self._update_all_conviction_scores_graceful()
+
+                # Broadcast unified signals (even if partial)
+                await self._broadcast_signals()
+
+                # Check system health
+                self._check_health()
+
+                # Wait before next update
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Error in fusion engine loop: {e}")
+                await asyncio.sleep(5)
+
     async def stop(self):
         """Stop the fusion engine"""
         self.running = False
@@ -94,6 +125,124 @@ class SignalFusionEngine:
             if score:
                 self.conviction_scores[narrative] = score
                 self._update_history(narrative, score)
+
+    async def _update_all_conviction_scores_graceful(self):
+        """Update conviction scores with graceful degradation"""
+        try:
+            # Try to get narratives from NarrativeFlow
+            if self.nf_client and self.nf_client.is_connected():
+                narratives = self.nf_client.get_all_narratives()
+            else:
+                # Use cached narratives if available
+                narratives = list(self.conviction_scores.keys()) if self.conviction_scores else ["AI", "DeFi", "RWA", "L1/L2", "Meme", "DePIN"]
+
+            for narrative in narratives:
+                score = await self._compute_conviction_score_graceful(narrative)
+                if score:
+                    self.conviction_scores[narrative] = score
+                    self._update_history(narrative, score)
+
+        except Exception as e:
+            logger.error(f"Error updating conviction scores: {e}")
+
+    async def _compute_conviction_score_graceful(self, narrative: str) -> Optional[ConvictionScore]:
+        """Compute conviction score with graceful degradation when backends are unavailable"""
+        try:
+            # Initialize default values
+            narrative_score = 50
+            orderflow_score = 50
+            sentiment_score = 50
+            onchain_score = 50
+            liquidity_score = 50
+            manipulation_penalty = 0
+
+            # Try to get NarrativeFlow data
+            if self.nf_client and self.nf_client.is_connected():
+                try:
+                    nf_data = self.nf_client.get_narrative_data(narrative)
+                    sentiment = self.nf_client.get_sentiment_score(narrative)
+
+                    if nf_data:
+                        narrative_score = nf_data.get("momentum_score", 50)
+                        onchain_score = self._normalize_onchain(nf_data.get("on_chain_delta", 0))
+                    if sentiment:
+                        sentiment_score = self._normalize_sentiment(sentiment.get("sentiment_strength", 50))
+                except Exception as e:
+                    logger.warning(f"Failed to get NarrativeFlow data: {e}")
+
+            # Try to get QuantFlow metrics
+            if self.qf_client and self.qf_client.is_connected():
+                try:
+                    qf_metrics = self.qf_client.get_latest_metrics()
+                    if qf_metrics:
+                        orderflow_score = self._normalize_obi(qf_metrics.get("obi", 0))
+                        liquidity_score = self._calculate_liquidity_score(qf_metrics)
+                        manipulation_penalty = self._calculate_manipulation_penalty()
+                except Exception as e:
+                    logger.warning(f"Failed to get QuantFlow data: {e}")
+
+            # Apply weights
+            raw_score = (
+                narrative_score * self.weights["narrative_momentum"] +
+                orderflow_score * self.weights["order_flow"] +
+                sentiment_score * self.weights["sentiment"] +
+                onchain_score * self.weights["on_chain"] +
+                liquidity_score * self.weights["liquidity"]
+            ) - (manipulation_penalty * self.weights["manipulation_penalty"])
+
+            # Clamp to 0-100
+            final_score = max(0, min(100, raw_score))
+
+            # Determine conviction level
+            if final_score > 80:
+                level = "HIGH"
+            elif final_score > 50:
+                level = "MODERATE"
+            else:
+                level = "LOW"
+
+            # Add warning if running in degraded mode
+            warnings = []
+            if not (self.qf_client and self.qf_client.is_connected()):
+                warnings.append("QuantFlow data unavailable")
+            if not (self.nf_client and self.nf_client.is_connected()):
+                warnings.append("NarrativeFlow data unavailable")
+
+            explanation = self._generate_explanation(
+                narrative=narrative,
+                components={
+                    "narrative_momentum": narrative_score,
+                    "order_flow": orderflow_score,
+                    "sentiment": sentiment_score,
+                    "on_chain": onchain_score,
+                    "liquidity": liquidity_score,
+                    "manipulation": manipulation_penalty
+                },
+                lifecycle_stage="unknown"
+            )
+
+            if warnings:
+                explanation += f" (DEGRADED: {', '.join(warnings)})"
+
+            return ConvictionScore(
+                narrative=narrative,
+                score=final_score,
+                level=level,
+                explanation=explanation,
+                components={
+                    "narrative_momentum": narrative_score,
+                    "order_flow": orderflow_score,
+                    "sentiment": sentiment_score,
+                    "on_chain": onchain_score,
+                    "liquidity": liquidity_score,
+                    "manipulation_penalty": manipulation_penalty
+                },
+                timestamp=datetime.utcnow()
+            )
+
+        except Exception as e:
+            logger.error(f"Error computing conviction score for {narrative}: {e}")
+            return None
 
     async def _compute_conviction_score(self, narrative: str) -> Optional[ConvictionScore]:
         """

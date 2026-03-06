@@ -33,6 +33,35 @@ fusion_engine: Optional[SignalFusionEngine] = None
 ws_manager: WebSocketManager = WebSocketManager()
 
 
+async def monitor_backend_health():
+    """Monitor backend health and attempt reconnection if needed"""
+    while True:
+        try:
+            # Check QuantFlow connection
+            if qf_client and not qf_client.is_connected():
+                logger.warning("QuantFlow disconnected, attempting reconnection...")
+                try:
+                    await qf_client.connect()
+                    logger.info("Successfully reconnected to QuantFlow")
+                except Exception as e:
+                    logger.error(f"Failed to reconnect to QuantFlow: {e}")
+
+            # Check NarrativeFlow connection
+            if nf_client and not nf_client.is_connected():
+                logger.warning("NarrativeFlow disconnected, attempting reconnection...")
+                try:
+                    await nf_client.connect()
+                    logger.info("Successfully reconnected to NarrativeFlow")
+                except Exception as e:
+                    logger.error(f"Failed to reconnect to NarrativeFlow: {e}")
+
+            await asyncio.sleep(30)  # Check every 30 seconds
+
+        except Exception as e:
+            logger.error(f"Error in health monitor: {e}")
+            await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifecycle - startup and shutdown"""
@@ -41,17 +70,31 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting SignalFlow backend...")
 
-    # Initialize clients
+    # Initialize clients with error handling
     qf_client = QuantFlowClient("ws://localhost:8000")
     nf_client = NarrativeFlowClient("ws://localhost:8001")
     fusion_engine = SignalFusionEngine(qf_client, nf_client, ws_manager)
 
-    # Start clients and fusion engine
-    await qf_client.connect()
-    await nf_client.connect()
+    # Try to connect to services with graceful degradation
+    try:
+        await qf_client.connect()
+        logger.info("Connected to QuantFlow backend")
+    except Exception as e:
+        logger.warning(f"Failed to connect to QuantFlow: {e}. Running in degraded mode.")
+        # Continue without QuantFlow - will use partial data
 
-    # Start fusion engine background task
-    asyncio.create_task(fusion_engine.run())
+    try:
+        await nf_client.connect()
+        logger.info("Connected to NarrativeFlow backend")
+    except Exception as e:
+        logger.warning(f"Failed to connect to NarrativeFlow: {e}. Running in degraded mode.")
+        # Continue without NarrativeFlow - will use partial data
+
+    # Start fusion engine background task with reconnection logic
+    asyncio.create_task(fusion_engine.run_with_reconnection())
+
+    # Start health check monitor
+    asyncio.create_task(monitor_backend_health())
 
     logger.info("SignalFlow backend started successfully")
 
@@ -113,7 +156,26 @@ async def get_conviction_scores() -> Dict[str, ConvictionScore]:
     if not fusion_engine:
         raise HTTPException(status_code=503, detail="Fusion engine not initialized")
 
-    return fusion_engine.get_current_conviction_scores()
+    try:
+        scores = fusion_engine.get_current_conviction_scores()
+
+        # Add degradation warning if running with partial data
+        qf_connected = qf_client and qf_client.is_connected()
+        nf_connected = nf_client and nf_client.is_connected()
+
+        if not (qf_connected and nf_connected):
+            for score in scores.values():
+                if hasattr(score, 'warnings'):
+                    if not qf_connected:
+                        score.warnings.append("QuantFlow data unavailable - using partial signals")
+                    if not nf_connected:
+                        score.warnings.append("NarrativeFlow data unavailable - using partial signals")
+
+        return scores
+
+    except Exception as e:
+        logger.error(f"Error getting conviction scores: {e}")
+        raise HTTPException(status_code=500, detail=f"Error retrieving conviction scores: {str(e)}")
 
 
 @app.get("/signals/combined-alerts")
