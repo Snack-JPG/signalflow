@@ -277,8 +277,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 For issues, questions, or suggestions, please open an issue on GitHub or reach out via:
 - GitHub Issues: [signal-flow/issues](https://github.com/yourusername/signal-flow/issues)
-- Discord: [Join our community](https://discord.gg/signalflow)
-
 ---
 
-*SignalFlow: Where order flow meets narrative momentum.*
+*Not financial advice. For educational and research purposes only.*
